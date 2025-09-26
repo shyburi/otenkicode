@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIコーディネート提案システム</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        .container { display: flex; flex-direction: column; gap: 20px; }
+        .section { border: 1px solid #ccc; padding: 20px; border-radius: 8px; }
+        #outfit-container { display: flex; flex-wrap: wrap; gap: 10px; }
+        .cloth-item img { max-width: 150px; height: auto; border-radius: 4px; }
+        input, select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 15px; border: none; background-color: #007BFF; color: white; border-radius: 4px; cursor: pointer; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="section">
+            <div id="auth-section">
+                <h2>ログイン / 新規登録</h2>
+                <form id="register-form">
+                    <p>
+                        <label>ユーザー名:</label><br>
+                        <input type="text" id="register-name" required>
+                    </p>
+                    <p>
+                        <label>メールアドレス:</label><br>
+                        <input type="email" id="register-email" required>
+                    </p>
+                    <p>
+                        <label>パスワード:</label><br>
+                        <input type="password" id="register-password" required>
+                    </p>
+                    <button type="submit">新規登録</button>
+                </form>
+                <hr>
+                <form id="login-form">
+                    <p>
+                        <label>メールアドレス:</label><br>
+                        <input type="email" id="login-email" required>
+                    </p>
+                    <p>
+                        <label>パスワード:</label><br>
+                        <input type="password" id="login-password" required>
+                    </p>
+                    <button type="submit">ログイン</button>
+                </form>
+            </div>
+            <div id="logout-section" class="hidden">
+                <p>ようこそ、<span id="welcome-message"></span>さん</p>
+                <button id="logout-button">ログアウト</button>
+            </div>
+        </div>
+
+        <div class="section hidden" id="cloth-section">
+            <h2>服を登録する</h2>
+            <p style="color: #666; margin-bottom: 20px;">
+                AIが画像を自動分析して服の詳細を認識します。画像をアップロードするだけで登録できます。
+            </p>
+            <form id="cloth-form" enctype="multipart/form-data">
+                <p>
+                    <label>画像ファイル:</label><br>
+                    <input type="file" name="file" id="cloth-file" accept="image/*" required>
+                </p>
+                <button type="submit" id="submit-btn">AI分析して登録</button>
+                <div id="analysis-status" style="display: none; margin-top: 10px; color: #007BFF;">
+                    AI分析中...
+                </div>
+            </form>
+        </div>
+
+        <div class="section hidden" id="outfit-section">
+            <h2>今日のコーディネート</h2>
+            <button id="get-outfit">提案を更新</button>
+            <div id="outfit-container">
+                </div>
+        </div>
+
+        <div class="section hidden" id="clothes-list-section">
+            <h2>登録された服一覧</h2>
+            <button id="show-clothes">服一覧を表示</button>
+            <div id="clothes-list-container">
+                </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
