@@ -1,5 +1,6 @@
 import os
 import json
+import random
 from dotenv import load_dotenv
 load_dotenv()
 from flask_cors import CORS
@@ -303,9 +304,8 @@ def get_outfit():
 
         weather_data = None
         
-        # 緯度・経度が存在する場合、天気APIを呼び出す
+        # 緯度・経度が存在する場合、天気APIを呼び出す (ここは変更なし)
         if lat and lon:
-            # OpenWeatherMapのAPIキーを環境変数から取得
             api_key = os.getenv("OPENWEATHER_API_KEY")
             if not api_key:
                 print("OPENWEATHER_API_KEY is not set. Using default weather data.")
@@ -314,18 +314,12 @@ def get_outfit():
                 weather_api_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&units=metric&appid={api_key}"
                 try:
                     weather_response = requests.get(weather_api_url, timeout=5)
-                    weather_response.raise_for_status() # HTTPエラーが発生した場合に例外を発生させる
+                    weather_response.raise_for_status()
                     weather_data_raw = weather_response.json()
-
                     temperature = weather_data_raw['main']['temp']
                     humidity = weather_data_raw['main']['humidity']
-                    
-                    weather_data = {
-                        'temperature': temperature,
-                        'humidity': humidity,
-                    }
+                    weather_data = {'temperature': temperature, 'humidity': humidity}
                     print(f"Real-time Weather data: {weather_data}")
-
                 except requests.exceptions.RequestException as e:
                     print(f"Error fetching weather data: {e}")
                     weather_data = {'temperature': 22, 'humidity': 65} # フォールバック
@@ -335,24 +329,17 @@ def get_outfit():
             weather_data = {'temperature': 22, 'humidity': 65}
             print("Using default weather data.")
 
-        # 天気情報に基づいてトップスを選定
+        # --- 1. トップス選定 (ランダム性を導入) ---
         suggested_top = None
         temperature = weather_data['temperature']
-        
-        # ログを追加: 現在の気温と全アイテムの情報を表示
-        print(f"--- Outfit Generation Start ---")
-        print(f"Current Temperature: {temperature}°C")
-        
-        # 適切なトップス候補のリストを拡張
         top_types = ['t-shirt', 'blouse', 'shirt', 'tank top', 'polo', 'sweater', 'hoodie', 'jacket']
         
-        # フォールバックのための変数を初期化
+        perfect_matches = [] # 適合する全アイテムを格納
         closest_cloth = None
         min_temp_diff = float('inf')
         highest_max_temp_cloth = None
         highest_max_temp = -float('inf') 
 
-        # 1. 適正温度範囲内のトップスを検索し、同時にフォールバック候補も収集する
         for cloth in user_clothes:
             if cloth.item_type and cloth.item_type.lower() in top_types and cloth.recommended_temp:
                 try:
@@ -362,93 +349,129 @@ def get_outfit():
                         min_temp = float(temp_range[0])
                         max_temp = float(temp_range[1])
                         
-                        # 気温が範囲内なら候補にする
+                        # 気温が範囲内なら「完璧な一致」リストに追加
                         if min_temp <= temperature <= max_temp:
-                            suggested_top = cloth
-                            print(f"Perfect match found: {suggested_top.item_type} with temp range {suggested_top.recommended_temp}")
-                            break
+                            perfect_matches.append(cloth)
                         
-                        # 範囲外の場合、最も近い温度差を計算
+                        # (フォールバックロジックのための計算は継続)
                         temp_diff = min(abs(temperature - min_temp), abs(temperature - max_temp))
                         if temp_diff < min_temp_diff:
                             min_temp_diff = temp_diff
                             closest_cloth = cloth
-                        
-                        # 最高気温が最も高い服を記録
                         if max_temp > highest_max_temp:
                             highest_max_temp = max_temp
                             highest_max_temp_cloth = cloth
-                        
-                        print(f"Checking: {cloth.item_type} ({cloth.recommended_temp}) is not in range. Diff: {temp_diff:.2f}")
-
-                    else:
-                        print(f"Skipping {cloth.item_type}: recommended_temp format is invalid - '{cloth.recommended_temp}'")
 
                 except (ValueError, IndexError):
-                    print(f"Error parsing temp for {cloth.item_type}: '{cloth.recommended_temp}'")
                     continue
         
-        # 2. 適切なトップスが見つからなかった場合のフォールバックロジック
-        if not suggested_top:
-            print("No perfect match found. Selecting the best alternative.")
-            
-            # 最高気温が最も高い服を優先して選択する
-            if highest_max_temp_cloth:
-                suggested_top = highest_max_temp_cloth
-                print(f"Using highest max temp match as fallback: {suggested_top.item_type} ({suggested_top.recommended_temp}) for {temperature}°C")
-            # それも見つからなければ、最も近い温度差の服を選択
-            elif closest_cloth:
-                suggested_top = closest_cloth
-                print(f"Using closest temperature match as fallback: {suggested_top.item_type} ({suggested_top.recommended_temp}) for {temperature}°C")
-        
+        if perfect_matches:
+            # 完全に適合するアイテムが複数あれば、その中からランダムに一つ選ぶ
+            suggested_top = random.choice(perfect_matches)
+            print(f"Randomly selected perfect match top: {suggested_top.item_type} ({suggested_top.recommended_temp})")
+        elif highest_max_temp_cloth:
+            # 完璧な一致がなければ、フォールバックロジックで選択
+            suggested_top = highest_max_temp_cloth
+            print(f"Using highest max temp match as fallback: {suggested_top.item_type}")
+        elif closest_cloth:
+            suggested_top = closest_cloth
+            print(f"Using closest temperature match as fallback: {suggested_top.item_type}")
+
         if not suggested_top:
             print("--- Outfit Generation Failed ---")
             return jsonify({'message': 'No suitable top found'}), 404
 
-        print(f"--- Outfit Generation Success ---")
+        print(f"--- Top Selected: {suggested_top.item_type} ---")
         
-        # Geminiにボトムスとアウターの提案を依頼
+        # --- 2. ボトムス選定 (Geminiに気象と相性の判断を依頼) ---
+        suggested_outfit = [suggested_top.to_dict()]
+        
+        # ユーザーのボトムスを抽出
+        bottom_types = ['Jeans', 'Skirt', 'Pants', 'Shorts', 'Trousers', 'Leggings']
+        user_bottoms = [c for c in user_clothes if c.item_type in bottom_types]
+
+        if user_bottoms:
+            suggested_top_info = f"{suggested_top.color_name} {suggested_top.item_type} ({suggested_top.style}, {suggested_top.material})"
+            current_weather_info = f"{temperature}°C, Humidity: {weather_data['humidity']}%"
+            
+            # Geminiに渡すためのボトムスリストを作成 (必要な属性のみ抽出)
+            bottoms_list_for_gemini = []
+            for bottom in user_bottoms:
+                bottoms_list_for_gemini.append({
+                    'id': bottom.id,
+                    'item_type': bottom.item_type,
+                    'color_name': bottom.color_name,
+                    'material': bottom.material,
+                    'style': bottom.style,
+                    'recommended_temp': bottom.recommended_temp,
+                    'recommended_humidity': bottom.recommended_humidity,
+                })
+
+            # ボトムス選定のためのプロンプト
+            bottom_selection_prompt = (
+                f"Current Weather: {current_weather_info}. Suggested Top: {suggested_top_info}. "
+                f"You have a list of available bottoms: {json.dumps(bottoms_list_for_gemini, ensure_ascii=False)}. "
+                f"Your task is to select **ONE** bottom from this list that meets two critical criteria:\n"
+                f"1. **Weather Suitability (気象条件への適応):** The bottom's 'recommended_temp' and 'recommended_humidity' must be suitable for the current weather. \n"
+                f"2. **Stylistic Match (トップスとの相性):** The selected bottom must be a good visual and stylistic match for the Suggested Top (considering color, pattern, and style).\n"
+                f"Return the JSON object of the **best-matching bottom** you select. The JSON must contain the 'id' of the selected item. If no suitable bottom is found, return an empty JSON object: {{}}."
+            )
+
+            try:
+                response = gemini_model.generate_content(bottom_selection_prompt)
+                
+                response_text = response.text.strip()
+                if response_text.startswith('```json'): response_text = response_text[7:]
+                if response_text.endswith('```'): response_text = response_text[:-3]
+                response_text = response_text.strip()
+                
+                selected_bottom_data = json.loads(response_text)
+                
+                if selected_bottom_data and 'id' in selected_bottom_data:
+                    # Geminiが返したIDでデータベースを検索
+                    suggested_bottom = db.session.get(Cloth, selected_bottom_data['id'])
+                    if suggested_bottom:
+                        suggested_outfit.append(suggested_bottom.to_dict())
+                        print(f"Gemini suggested bottom: {suggested_bottom.item_type}")
+                    else:
+                        print("Gemini suggested an item ID not found in DB.")
+                else:
+                    print("Gemini could not suggest a suitable bottom or returned an empty response.")
+                    
+            except Exception as e:
+                print(f"Gemini Bottom Selection error: {e}")
+                # エラー時でもコーディネートを停止させない
+                pass 
+        else:
+            print("No bottoms registered.")
+        
+        # --- 3. アウター選定 (既存のロジックを踏襲。必要に応じてランダム性も検討) ---
+        # 既存のロジックはアウターの候補をGeminiから受け取り、その中からユーザーが持つものを探すもの
         outfit_prompt = (
             f"Based on a {suggested_top.color_name} {suggested_top.item_type} ({suggested_top.style} style) with {suggested_top.material} material, "
-            f"suggest a matching bottom and a suitable jacket for a temperature of {temperature}°C. "
-            f"Provide the output as a JSON object with 'bottoms' and 'jackets' arrays, each containing items with 'item_type' and 'color_name'."
+            f"suggest a suitable jacket for a temperature of {temperature}°C. "
+            f"Provide the output as a JSON object with 'jackets' array, each containing items with 'item_type' and 'color_name'."
         )
         try:
             response = gemini_model.generate_content(outfit_prompt)
 
-            print(f"Gemini's Outfit Suggestion (Raw): {response.text}") 
-            # レスポンスからJSONを抽出
             response_text = response.text.strip()
-            # マークダウンのコードブロック記法を除去
-            if response_text.startswith('```json'):
-                response_text = response_text[7:]
-            if response_text.endswith('```'):
-                response_text = response_text[:-3]
-            
-            # 再度trimして、末尾の余分な改行やスペースを削除
+            if response_text.startswith('```json'): response_text = response_text[7:]
+            if response_text.endswith('```'): response_text = response_text[:-3]
             response_text = response_text.strip()
             
             gemini_outfit = json.loads(response_text)
-        except (ValueError, json.JSONDecodeError) as e:
-            print(f"Gemini response is not valid JSON. Response text: '{response_text}'")
-            return jsonify({'error': f'Failed to parse Gemini API response: {str(e)}'}), 500
-        
-        # データベースから提案されたアイテムを選択
-        suggested_outfit = [suggested_top.to_dict()]
-        
-        # ボトムスの選定
-        for bottom_suggestion in gemini_outfit.get('bottoms', []):
-            match = next((c for c in user_clothes if c.item_type == bottom_suggestion['item_type'] and c.color_name == bottom_suggestion['color_name']), None)
-            if match:
-                suggested_outfit.append(match.to_dict())
-                break
-        
-        # アウターの選定
-        for jacket_suggestion in gemini_outfit.get('jackets', []):
-            match = next((c for c in user_clothes if c.item_type == jacket_suggestion['item_type'] and c.color_name == jacket_suggestion['color_name']), None)
-            if match:
-                suggested_outfit.append(match.to_dict())
-                break
+            
+            # アウターの選定 (Geminiの提案に厳密に一致するものを検索)
+            for jacket_suggestion in gemini_outfit.get('jackets', []):
+                match = next((c for c in user_clothes if c.item_type == jacket_suggestion['item_type'] and c.color_name == jacket_suggestion['color_name']), None)
+                if match:
+                    suggested_outfit.append(match.to_dict())
+                    break
+
+        except Exception as e:
+            print(f"Gemini Jacket Suggestion error: {e}")
+            pass # アウターの提案に失敗しても全体の処理は続行
         
         return jsonify(suggested_outfit)
         
