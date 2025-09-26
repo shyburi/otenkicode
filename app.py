@@ -27,7 +27,7 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Geminiモデルのインスタンスをグローバルに定義
-gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+gemini_model = genai.GenerativeModel('gemini-2.5-flash')
 
 # データベースの初期設定とFlaskアプリの初期化
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -415,6 +415,8 @@ def get_outfit():
         )
         try:
             response = gemini_model.generate_content(outfit_prompt)
+
+            print(f"Gemini's Outfit Suggestion (Raw): {response.text}") 
             # レスポンスからJSONを抽出
             response_text = response.text.strip()
             # マークダウンのコードブロック記法を除去
